@@ -1,0 +1,188 @@
+- name: read csv file to get vmname and ip address
+  read_csv:
+    path: "{{ csv_path }}" #/home/svcans01/sreram/redhat_vm_patching/roles/patching_redhat/tasks/redhat_patching.csv
+    key: vm_name
+  register: vms
+  delegate_to: localhost
+
+- name: Ensure the target directory exists
+  ansible.builtin.file:
+    path: "{{ temp_dir }}"
+    state: directory
+    mode: '0777'
+
+- name: copy the file to destination server
+  ansible.builtin.copy:
+    src: "validate.sh"  #this looks inside the roles/patching_redhat/files
+    dest: "{{ temp_dir }}/validate.sh"
+    mode: '0777'
+
+- name: Run validate.sh script before patching and capture output
+  ansible.builtin.shell: "{{ validate_script_dest }}"
+  register: validate_status_pre
+  failed_when: validate_status_pre.rc != 0
+
+- name: Save validate.sh output to a text file
+  ansible.builtin.copy:
+    content: "{{ validate_status_pre.stdout }}"
+    dest: "{{ before_patch_file }}"
+
+- name: Set facts for current host's vCenter info
+  set_fact:
+    current_vm_info: "{{ vms.dict[inventory_hostname] }}"
+  when: inventory_hostname in vms.dict
+
+- name: Create VM snapshot
+  community.vmware.vmware_guest_snapshot:
+    hostname: "{{ current_vm_info.vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    validate_certs: no
+    datacenter: "{{ current_vm_info.vcenter_datacenter }}"
+    folder: "{{ current_vm_info.vcenter_folder }}"
+    name: "{{ current_vm_info.vm_name }}"
+    snapshot_name: "PrePatch_{{ current_vm_info.vm_name }}_{{ ansible_date_time.iso8601 }}"
+    description: "Auto snapshot via Ansible"
+    state: present
+    memory_dump: true
+  register: snapshot_result
+  delegate_to: localhost
+  when:
+    - current_vm_info is defined
+    - current_vm_info.take_snapshot | default('no') == 'yes'
+  failed_when: snapshot_result.failed
+
+- name: Check snapshot creation result
+  debug:
+    msg: "Snapshot created successfully for VM: {{ current_vm_info.vm_name }}"
+  when: snapshot_result.changed
+
+- name: Log when snapshot is skipped
+  debug:
+    msg: "Snapshot skipped for VM: {{ current_vm_info.vm_name }}"
+  when:
+    - current_vm_info is defined
+    - current_vm_info.take_snapshot | default('no') | lower != 'yes'
+
+- name: reboot gracefully
+  #become: true
+  reboot:
+    reboot_timeout: 1200
+    pre_reboot_delay: 5
+    post_reboot_delay: 15
+    test_command: "whoami"
+
+
+PLAY RECAP ************************************************************************************************************************************************
+AWX-TEST                   : ok=13   changed=3    unreachable=0    failed=1    skipped=1    rescued=1    ignored=0
+localhost                  : ok=4    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+test-linux1                : ok=31   changed=11   unreachable=0    failed=0    skipped=7    rescued=0    ignored=0
+
+[svcans01@plnc0429bdans01 Unix_Patching]$
+
+
+TASK [patching_redhat : reboot gracefully] ****************************************************************************************************************
+fatal: [AWX-TEST]: FAILED! => {"changed": false, "elapsed": 0, "msg": "Reboot command failed. Error was: 'Failed to set wall message, ignoring: Interactive authentication required.\r\nFailed to schedule shutdown: Interactive authentication required., Shared connection to 10.190.19.174 closed.'", "rebooted": false, "start": "2026-02-02T09:05:43.031628+00:00"}
+changed: [test-linux1]
+
+
+---
+- name: SLES Linux OS Patching
+  hosts: all
+  serial: "{{ serial_number | default(10) }}"
+  gather_facts: yes
+  vars_files:
+    - vault_pass.yml
+
+  pre_tasks:
+    - name: Ensure log directory exists
+      file:
+        path: /infravol/config_backup/patch_logs/error_logs
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+  tasks:
+    - name: Run patching with error handling
+      block:
+        - name: Run RedHat patching role
+          include_role:
+            name: patching_redhat
+          when: ansible_distribution == "RedHat"
+
+        - name: Run SUSE patching role
+          include_role:
+            name: patching_suse
+          when: ansible_os_family == "Suse" or ansible_distribution == "SLES"
+
+        - name: Mark patch status as success
+          set_fact:
+            patch_status:
+              status: "success"
+      rescue:
+        - name: Capture failure from role
+          set_fact:
+            patch_status:
+              status: "failed"
+              task: "{{ ansible_failed_task.name | default('Task not captured') }}"
+              msg: "{{ ansible_failed_result.msg | default('No message') }}"
+
+        - name: Log failure to file
+          copy:
+            content: |
+              Host: {{ inventory_hostname }}
+              Failed Task: {{ patch_status.task }}
+              Error: {{ patch_status.msg }}
+            dest: "/infravol/config_backup/patch_logs/error_logs/{{ inventory_hostname }}_role_error.log"
+          delegate_to: localhost
+
+        - name: Mark host as failed
+          fail:
+            msg: "Role execution failed for {{ inventory_hostname }}. See log for details."
+
+- name: Aggregate patch results on localhost
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Initialize patch success and error lists
+      set_fact:
+        patch_success: []
+        patch_errors: {}
+
+    - name: Aggregate results from hosts
+      set_fact:
+        patch_success: "{{ patch_success + [item] if hostvars[item].patch_status.status == 'success' else patch_success }}"
+        patch_errors: "{{ patch_errors | combine({ item: hostvars[item].patch_status}) if hostvars[item].patch_status == 'failed' else patch_errors }}"
+      loop: "{{ groups['all'] }}"
+      when: item != 'localhost' and hostvars[item].patch_status is defined
+
+    - name: Create patch summary content
+      set_fact:
+        patch_summary: |
+          Patch Summary Report
+
+          Successful Hosts:
+          {% for host in patch_success %}
+          - {{ host }}
+          {% else %}
+          None
+          {% endfor %}
+
+          Failed Hosts:
+          {% for host, error in patch_errors.items() %}
+          - {{ host }}: {{ error.task | default('unknown task') }} - Logs are saved at /infravol directory.
+          {% else %}
+          None
+          {% endfor %}
+
+
+    - name: Send patch summary email
+      mail:
+        host: "casarray1.bdx.com"
+        port: 25
+        secure: never
+        from: "ashvani.kumar@bd.com"
+        to: "ashvani.kumar@bd.com"
+        subject: "Linux Patching Completed"
+        body: "{{ patch_summary }}"
