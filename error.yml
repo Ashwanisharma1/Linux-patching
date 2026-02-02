@@ -15,12 +15,12 @@
       delegate_to: localhost
       run_once: true
 
-  tasks:
     - name: Initialize patch status
-      set_fact:
-        patch_status:
-          status: "running"
-
+      set_stats:
+        data:
+          patch_status:
+            status: "running"
+  tasks:
     - name: Run patching with error handling
       block:
         - name: Run RedHat patching role
@@ -34,16 +34,19 @@
           when: ansible_os_family == "Suse" or ansible_distribution == "SLES"
 
         - name: Mark patch status as success
-          set_fact:
-            patch_status:
-              status: "success"
+          set_stats:
+            data:
+              patch_status:
+                status: "success"
+
       rescue:
         - name: Capture failure from role
-          set_fact:
-            patch_status:
-              status: "failed"
-              task: "{{ ansible_failed_task.name | default('Task not captured') }}"
-              msg: "{{ ansible_failed_result.msg | default('No message') }}"
+          set_stats:
+            data:
+              patch_status:
+                status: "failed"
+                task: "{{ ansible_failed_task.name | default('Task not captured') }}"
+                msg: "{{ ansible_failed_result.msg | default('No message') }}"
 
         - name: Log failure to file
           copy:
@@ -54,11 +57,11 @@
             dest: "/infravol/config_backup/patch_logs/error_logs/{{ inventory_hostname }}_role_error.log"
           delegate_to: localhost
 
-        - name: Mark host as failed
-          fail:
-            msg: "Role execution failed for {{ inventory_hostname }}. See log for details."
-        #- name: stop execution for this host
-        #  meta: end_host
+        #- name: Mark host as failed
+         # fail:
+          #  msg: "Role execution failed for {{ inventory_hostname }}. See log for details."
+        - name: stop execution for this host
+          meta: end_host
 
 - name: Aggregate patch results on localhost
   hosts: localhost
@@ -74,7 +77,10 @@
         patch_success: "{{ patch_success + [item] if hostvars[item].patch_status.status == 'success' else patch_success }}"
         patch_errors: "{{ patch_errors | combine({ item: hostvars[item].patch_status}) if hostvars[item].patch_status == 'failed' else patch_errors }}"
       loop: "{{ groups['all'] }}"
-      when: item != 'localhost' and hostvars[item].patch_status is defined
+      when:
+        - item != 'localhost'
+        - hostvars[item].ansible_stats is defined
+        - hostvars[item].ansible_stats.data.patch_status is defined
 
     - name: Create patch summary content
       set_fact:
