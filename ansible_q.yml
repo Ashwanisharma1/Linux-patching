@@ -1,0 +1,76 @@
+A. Core Ansible Concepts (Intermediate)
+
+What is the difference between import_role and include_role in Ansible?
+How does Ansible work internally? How does it copy tasks to target hosts?
+What is idempotency in Ansible? Provide an example.
+How does Ansible ensure idempotency across modules and tasks? In which scenarios can idempotency break?
+What is the difference between vars, host_vars, group_vars, vars_files, set_fact, and extra_vars?
+What is the difference between delegate_to and local_action?
+What is RBAC in Ansible Automation Platform (AAP)?
+What are the components of an Execution Environment?
+What are the major components of Ansible Automation Platform (AAP)?
+
+B. Ansible Performance, Scaling & Execution Behavior (Advanced)
+Why do we use serial in a playbook?
+What is the difference between serial, throttle, and forks, and when should each be used?
+What is pipelining in Ansible?
+What are the performance implications of using delegate_to vs run_once?
+You need to run a playbook across 500+ servers. What would you do to prevent overload?
+How can you reduce playbook execution time?
+
+C. Error Handling, Resiliency & Troubleshooting (Advanced)
+
+Explain the difference between block, rescue, and always in Ansible. How would you use them for robust error handling?
+Your playbook intermittently fails due to network latency. How would you troubleshoot and make it more resilient?
+What happens in the background when you run ansible all -m ping?
+
+
+File Handling, Templates & Data Processing (Intermediate)
+
+How do you write output from all hosts to a file? What are throttle and serial, and how do they affect output?
+How do you read a CSV file using Ansible?
+Explain the purpose of this Jinja2 expression and how default works:
+hostvars[host]['ansible_default_ipv4']['address'] | default('NA')
+
+Explain the purpose of this Jinja2 expression and how default works:
+hostvars[host]['ansible_default_ipv4']['address'] | default('NA')
+
+
+How do you generate JSON‑formatted output in Ansible?
+
+
+E. Real‑World Scenarios & Practical Use Cases (Intermediate/Advanced)
+
+Suppose you are copying a 1 GB file to a remote host, but only half the file was copied. How would you handle this situation?
+Have you worked on any end‑to‑end automation tasks using Ansible? Describe one.
+How do you handle secrets in Ansible across different teams?
+What module is used for NFS volume creation in Ansible?
+Have you worked with storage and backup automation?
+
+
+F. Collections, Execution Environments & AAP (Intermediate)
+
+How do you install an Ansible collection?
+What is an Execution Environment, and why is it used in AAP?
+What are the components of Ansible Automation Platform?
+
+
+G. Windows, Email, CLI & Misc (Beginner/Intermediate)
+
+How do you send an email using CLI and from Ansible Tower/Controller?
+How do you connect to a Windows machine using Ansible?
+What happens in the background when running ansible all -m ping?
+
+
+H. Git Concepts (Beginner/Intermediate)
+
+How would you recover a deleted branch or commit that was removed accidentally?
+
+
+I. Conditional Logic & Jinja2 (Intermediate)
+
+What is the difference between the following conditions?
+
+when: myvar
+when: myvar is defined
+when: myvar | default(false)
